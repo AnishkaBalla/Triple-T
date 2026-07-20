@@ -113,7 +113,21 @@ def split_dataset(images_dir, labels_dir, output_dir, split=(0.7, 0.2, 0.1), see
     print(f"Split {n} images -> train:{len(splits['train'])} valid:{len(splits['valid'])} test:{len(splits['test'])}")
 
 # 
+def draw_bounding_boxes(images_dir, labels_dir, num_samples = 15):
+    images = [f for f in os.listdir(images_dir) if f.lower().endswith(".jpg")]
+    random.seed(42)
+    sampled_images = random.sample(images, min(num_samples, len(images)))
 
+    for filename in sampled_images:
+        image_path = os.path.join(images_dir, filename)
+        label_path = os.path.join(labels_dir, os.path.splitext(filename)[0] + ".txt")
+
+        draw_boxes(image_path, label_path)
+print("Testing draw_bounding_boxes() with sample images from train dataset:")
+draw_bounding_boxes(
+    images_dir="data/microplastic-dataset-for-computer-vision/train/images",
+    labels_dir="data/microplastic-dataset-for-computer-vision/train/labels"
+)
 
 
 # 
