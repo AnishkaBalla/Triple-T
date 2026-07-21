@@ -123,11 +123,14 @@ def draw_bounding_boxes(images_dir, labels_dir, num_samples = 15):
         label_path = os.path.join(labels_dir, os.path.splitext(filename)[0] + ".txt")
 
         draw_boxes(image_path, label_path)
-print("Testing draw_bounding_boxes() with sample images from train dataset:")
-draw_bounding_boxes(
-    images_dir="data/microplastic-dataset-for-computer-vision/train/images",
-    labels_dir="data/microplastic-dataset-for-computer-vision/train/labels"
-)
+
+
+if __name__ == "__main__":
+    print("Testing draw_bounding_boxes() with sample images from train dataset:")
+    draw_bounding_boxes(
+        images_dir="data/microplastic-dataset-for-computer-vision/train/images",
+        labels_dir="data/microplastic-dataset-for-computer-vision/train/labels"
+    )
 
 
 # 
