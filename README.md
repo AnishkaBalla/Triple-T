@@ -2,11 +2,14 @@
 
 Collaborators: Anya Saravanan, Prerita Singh, and Anishka Balla
 
-**Project Title: DISASTER RESPONSE AI**
+**Project Title: Real-Time Microplastic Detection**
 
 
 
-This takes in a social media post (text + image) from a real crisis event and outputs a priority score to help emergency responders figure out where help is needed most. We clean and explore datasets, train a text classifier on tweet captions, build a CNN from scratch to classify damage severity in photos, then combine both models into a single fusion scorer, and wrap the week with a live demo (website) and a short presentation where we walk through our results (including a bias measure to show how the model performs differently across disaster types).
+We developed our own custom CNN using micro-particle microscopy images from a pre-existing Kaggle dataset to isolate plastic pollutants in drinking water. The network identifies the exact contours of microscopic synthetic fibers. A possible application of this allows for automated water filtration systems to trap dangerous particles before consumption.
+
+Microplastic Dataset for Computer Vision: This dataset contains labeled microscopy images specifically isolated from urban water sources (including tap water, filtered water, and greywater) using membrane filtration and staining. It is tailored for automated computer vision detection and morphological classification.
+
 
 
 

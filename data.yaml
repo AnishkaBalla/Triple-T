@@ -1,7 +1,0 @@
-path: data/microplastic-dataset-for-computer-vision
-train: train/images
-val: valid/images
-test: test/images
-nc: 1
-names: ['Microplastic']
-
