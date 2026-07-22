@@ -6,17 +6,11 @@ from PIL import Image #used for handling, editing, and saving images
 from pathlib import Path #object oriented approach to handle filesystem paths
 
 
-dataset_path = Path.cwd()  #start from the current working dataset directory
+repo_root = Path(__file__).resolve().parent.parent
+dataset_path = repo_root / 'data' / 'microplastic-dataset-for-computer-vision'
 
-for candidate in [dataset_path, dataset_path.parent]:
-    # checks whether the dataset exists in the current folder or its parent
-    possible = candidate / 'data' / 'microplastic-dataset-for-computer-vision'
-    if possible.exists():
-        dataset_path = possible  #use the found dataset path
-        break
-else:
-    # fallback if the dataset was not found in either location
-    dataset_path = dataset_path / 'data' / 'microplastic-dataset-for-computer-vision'
+if not dataset_path.exists():
+    dataset_path = Path.cwd() / 'data' / 'microplastic-dataset-for-computer-vision'
 
 images_dir = dataset_path / 'images'
 labels_dir = dataset_path / 'labels'
