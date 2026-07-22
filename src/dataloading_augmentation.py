@@ -15,12 +15,20 @@ train_transform = v2.Compose([
     v2.ToDtype(torch.float32, scale=True)  # Normalizes pixel values to [0, 1]
 ])
 
-data_path = r"C:\Users\anish\Triple-T\data\microplastic-dataset-for-computer-vision\images"
-train_dataset = ImageFolder(root=data_path, transform=train_transform)
+from pathlib import Path #object oriented approach to handle filesystem paths
+
+repo_root = Path(__file__).resolve().parent.parent
+dataset_path = repo_root / 'data' / 'microplastic-dataset-for-computer-vision' / 'images'
+
+if not dataset_path.exists():
+    dataset_path = Path.cwd() / 'data' / 'microplastic-dataset-for-computer-vision' / 'images'
+
+
+train_dataset = ImageFolder(root=dataset_path, transform=train_transform)
 
 train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
 
-annotations_df = pd.read_csv(r"C:\Users\anish\Triple-T\data\microplastic-dataset-for-computer-vision\labels\_annotations.csv")
+annotations_df = pd.read_csv(dataset_path.parent / 'labels' / '_annotations.csv')
 
 numeric_annotations = annotations_df.select_dtypes(include=[np.number])
 annotation_tensors = torch.tensor(numeric_annotations.values, dtype=torch.float32)
