@@ -208,6 +208,10 @@ def main():
     print("training finished")
     evaluate_model(model, test_loader, DEVICE)
 
+    print("Saving the trained model...")
+    torch.save(model.state_dict(), "customCNN.pt")
+
+
 
 if __name__ == "__main__":
     main()

@@ -1,0 +1,6 @@
+1. preprocessing
+2. cnn_model
+3. train.py
+4. dataloading_augmentation
+5. checkpoint
+6. check_dataset

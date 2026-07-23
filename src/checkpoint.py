@@ -4,7 +4,7 @@ import torch
 #saves the models weights when current_loss is less than best_loss, and also saves the best_loss value
 #im lowk cooking rn
 class ModelCheckpoint:
-  def __init__(self, filepath='best_model.pt'):
+  def __init__(self, filepath='customCNN.pt'):
     self.filepath = filepath
     self.best_loss = float('inf')  
 
