@@ -145,7 +145,7 @@ def main():  #trianing pipeline
     torch.manual_seed(42)  # set a fixed random seed so training is reproducible.
     labels_df = pd.read_csv(LABELS_PATH)  # load the annotation DataFrame from the labels CSV.
     image_paths = [p for p in IMAGES_DIR.rglob("*") if p.is_file() and p.suffix.lower() in {".jpg", ".jpeg", ".png"}]  # Collect all image paths from the chosen image root.
-    train_files, test_files = train_test_split(image_paths, test_size=0.2, random_state=42)  # Split the image paths into train and test sets.
+    train_files, test_files = train_test_split(image_paths, test_size=0.3, random_state=42)  # Split the image paths into train and test sets.
     train_loader = make_loader(train_files, labels_df, BATCH_SIZE, shuffle=True)  # Create the training DataLoader.
     test_loader = make_loader(test_files, labels_df, BATCH_SIZE, shuffle=False)  # Create the test DataLoader.
 

@@ -21,7 +21,7 @@ class CustomCNN(nn.Module):
             nn.Flatten(),
             nn.Linear(128 * 32 * 32, 128),
             nn.ReLU(),
-            nn.Dropout(0.3),
+            nn.Dropout(0.5),
             nn.Linear(128, max_objects * 5),
         )
 
