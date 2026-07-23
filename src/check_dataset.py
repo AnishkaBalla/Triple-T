@@ -8,7 +8,7 @@ import time
 repo_root = Path(__file__).resolve().parent.parent
 organized_images_dir = repo_root / "new_data" / "archive" / "train"
 manifest_file = repo_root / "new_data" / "archive" / "valid" / "_annotations.csv"
-labels_df = pd.read_csv(labels_df)
+labels_df = pd.read_csv(manifest_file)
 print(labels_df.head()) #the labels df now contains the image metadata that the training pipeline uses
 
 image_folder = [organized_images_dir]
