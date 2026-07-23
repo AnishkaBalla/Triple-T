@@ -1,45 +1,48 @@
 import os
 import pandas as pd
 import matplotlib.pyplot as plt
+from pathlib import Path
 from PIL import Image
 import time
 
-image_folder = ["data/microplastic-dataset-for-computer-vision/images", "data/microplastic-dataset-for-computer-vision/images/ClassA"]
-annotation_file = "data/microplastic-dataset-for-computer-vision/labels/_annotations.csv"
-annotations = pd.read_csv(annotation_file)
-print(annotations.head()) #since the csv from the dataset is in a different format (VOC), it looks like filename | xmin | ymin | xmax | ymax -> 4 values making up the boundary box
+repo_root = Path(__file__).resolve().parent.parent
+organized_images_dir = repo_root / "data" / "microplastic-dataset-for-computer-vision" / "organized_images"
+manifest_file = organized_images_dir / "dataset_manifest.csv"
+manifest = pd.read_csv(manifest_file)
+print(manifest.head()) #the manifest now contains the image metadata that the training pipeline uses
 
+image_folder = [organized_images_dir, organized_images_dir / "ClassA"]
 images = []
 for folder in image_folder: 
     images.extend(os.listdir(folder))
 
-print("Number of images:", len(images)) #503 images
+print("Number of images:", len(images)) #the organized image folders are now the source of truth
 
-objects = annotations.groupby("filename").size() 
-print(objects) #counts the number of microplastics per image
-print("Max number of microplastics in an image:", objects.max()) #the max is 28
+objects = manifest.groupby("filename").size() 
+print(objects) #counts how many rows each image has in the manifest
+print("Max number of manifest rows per image:", objects.max())
 
-missing = set(annotations["filename"]) - set(images)
-print("Missing images:", len(missing)) #203 images appear in annotations but not in image folders
+missing = set(manifest["filename"]) - set(images)
+print("Missing images:", len(missing)) #checks whether any manifest entry points to an image that is no longer present
 
-print("Number images:", len(images)) #579 images in dataset
-print("CSV unique images:", len(annotations["filename"].unique())) #204 unique labeled images (meaning the rest have no microplastic - assumption)
+print("Number images:", len(images)) #the organized dataset count
+print("Manifest unique images:", len(manifest["filename"].unique()))
 
-annotations["box_width"] = annotations["xmax"] - annotations["xmin"]
-annotations["box_height"] = annotations["ymax"] - annotations["ymin"]
+manifest["box_width"] = manifest["xmax"] - manifest["xmin"]
+manifest["box_height"] = manifest["ymax"] - manifest["ymin"]
 print("\nBounding Box Width Stats:")
-print(annotations["box_width"].describe())
+print(manifest["box_width"].describe())
 print("\nBounding Box Height Stats:")
-print(annotations["box_height"].describe())
+print(manifest["box_height"].describe())
 #plotting boundary box distributions
 
-plt.hist(annotations["box_width"], bins=20)
+plt.hist(manifest["box_width"], bins=20)
 plt.title("Microplastic Bounding Box Width Distribution")
 plt.xlabel("Width (pixels)")
 plt.ylabel("Count")
 plt.show()
 
-plt.hist(annotations["box_height"], bins=20)
+plt.hist(manifest["box_height"], bins=20)
 plt.title("Microplastic Bounding Box Height Distribution")
 plt.xlabel("Height (pixels)")
 plt.ylabel("Count")

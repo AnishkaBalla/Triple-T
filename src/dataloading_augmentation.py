@@ -26,8 +26,9 @@ train_dataset = ImageFolder(root=dataset_path, transform=train_transform)  # PyT
 
 train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)  #data loader that batches images and shuffles them during training.
 
-annotations_df = pd.read_csv(dataset_path.parent / 'labels' / '_annotations.csv')  #read the annotation CSV from the dataset labels folder.
+manifest_path = dataset_path / 'dataset_manifest.csv'  #read the manifest CSV from the selected dataset folder.
+annotations_df = pd.read_csv(manifest_path)  #read the manifest CSV from the dataset folder.
 
-numeric_annotations = annotations_df.select_dtypes(include=[np.number])  #keep only the numeric columns from the annotation table for tensor conversion.
+numeric_annotations = annotations_df.select_dtypes(include=[np.number]).fillna(0)  #keep only the numeric columns from the manifest table and fill missing values with zero for stable tensor conversion.
 annotation_tensors = torch.tensor(numeric_annotations.values, dtype=torch.float32)  # convert the numeric annotation values into a PyTorch tensor.
 

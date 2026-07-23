@@ -3,6 +3,7 @@ from pathlib import Path  # path so the script uses portable filesystem paths in
 from typing import Optional, Tuple  #  the typing helpers used by the function annotations.
 
 import pandas as pd  
+from PIL import Image  # PIL so the image width and height can be read directly from each file.
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent  #resolves the repository root from the script location so the paths work on GitHub and any machine.
@@ -30,19 +31,11 @@ def class_name_from_filename(filename: str) -> Optional[str]:  # Accepts a filen
 def prepare_classified_dataset(dataset_root: Path | str = DEFAULT_DATASET_ROOT, output_dir: Path | str = DEFAULT_OUTPUT_DIR, annotations_path: Path | str | None = None, include_unlabeled: bool = True) -> Tuple[Path, Path]:  # Accepts the dataset root, output folder, annotation file, and whether unlabeled images should be included.
     dataset_root = Path(dataset_root)  #dataset root -> pathlib Path object.
     output_dir = Path(output_dir)  # output directory -> pathlib Path object.
-    if annotations_path is None:  # uses the default annotation file when "none" passed in
-        annotations_path = dataset_root / "labels" / "_annotations.csv"  #points to the dataset annotation CSV inside the repository.
-    annotations_path = Path(annotations_path)  #  annotation path -> pathlib Path object.
-
     output_dir.mkdir(parents=True, exist_ok=True)  # creates the output directory if it does not exist yet.
     manifest_path = output_dir / "dataset_manifest.csv"  #creates the manifest path inside the output directory.
 
-    if not annotations_path.exists():  # raises error if the annotation file is missing.
-        raise FileNotFoundError(f"Annotations file not found: {annotations_path}")  
-
-    annotations = pd.read_csv(annotations_path)  # reads the annotation CSV into a DataFrame.
-    if "filename" not in annotations.columns:  # Makes sure the CSV contains the required filename column.
-        raise ValueError("The annotations CSV must contain a 'filename' column")  # Raises a clear error if the column is missing.
+    if annotations_path is not None:  # keeps the parameter available for compatibility but does not use it as the main source of truth anymore.
+        annotations_path = Path(annotations_path)  # converts the passed path into a pathlib Path object.
 
     image_root = dataset_root / "images"  # points to the original images directory inside the dataset root.
     if not image_root.exists():  # raises an error if the original images folder is missing.
@@ -62,33 +55,40 @@ def prepare_classified_dataset(dataset_root: Path | str = DEFAULT_DATASET_ROOT, 
     manifest_rows = []  # empty list that will store the manifest records.
     copied_count = 0  #tracks how many images were copied into the organized folders.
 
-    annotated_names = {Path(name).name for name in annotations["filename"].dropna().astype(str).unique()}  # collects the filenames that appear in the annotations so they can be mapped to classes.
     all_image_files = [p for p in image_root.rglob("*") if p.is_file() and p.suffix.lower() in {".jpg", ".jpeg", ".png"}]  #finds every image file under the dataset images folder.
 
     for source_path in all_image_files:  # iterates through every discovered image file.
-        filename = source_path.name  # Stores the file name
-        if filename in annotated_names:  # checks whether the image is explicitly labeled in the annotation CSV
-            class_name = class_name_from_filename(filename)  # maps the filename prefix to a class.
-            if class_name is None:  #skips images that do not belong to a known class prefix.
+        filename = source_path.name  # Stores the file name.
+        class_name = class_name_from_filename(filename)  # maps the filename prefix to a class.
+        if class_name is None:  # if the image does not match one of the known class prefixes, it is treated as background when enabled.
+            if include_unlabeled:  # sends unlabeled images to the Background folder when enabled.
+                destination_dir = class_dirs["Background"]  #selects the Background destination folder.
+            else:  # skips unlabeled images when the option is disabled.
                 continue  
+        else:  # uses the detected class folder when the filename matches a known prefix.
             destination_dir = class_dirs[class_name]  #Selects the class destination folder.
-        elif include_unlabeled:  # sends unlabeled images to the Background folder when enabled.
-            destination_dir = class_dirs["Background"]  #selects the Background destination folder.
-        else:  # skips unlabeled images when the option is disabled.
-            continue  
 
         destination_path = destination_dir / filename  #builds the destination path for the image file.
         if not destination_path.exists():  # copies the file ONLY if it is not already present in the destination folder.
             shutil.copy2(source_path, destination_path)  #copies the image while preserving metadata.
+
+        with Image.open(source_path) as image:  # opens the source image so its dimensions can be written into the manifest.
+            width, height = image.size  # reads the actual image width and height from the file.
+
         manifest_rows.append({  # records the copy operation in the manifest row list.
-            "filename": filename,  #stores image file name idk.
-            "class": destination_dir.name,  #stores the destination class name
-            "source": str(source_path),  # stores the original source path.
-            "destination": str(destination_path),  # stores the copied destination path.
+            "filename": filename,  #stores image file name.
+            "width": width,  #stores the image width in pixels.
+            "height": height,  #stores the image height in pixels.
+            "class": destination_dir.name,  #stores the destination class name.
+            "xmin": 0,  #stores the left edge of the box.
+            "ymin": 0,  #stores the upper edge of the box.
+            "xmax": width,  #stores the right edge of the box.
+            "ymax": height,  #stores the lower edge of the box.
         })
         copied_count += 1  # increments the image counter after a successful copy.
 
     manifest_df = pd.DataFrame(manifest_rows)  # builds a DataFrame from the manifest rows.
+    manifest_df = manifest_df[["filename", "width", "height", "class", "xmin", "ymin", "xmax", "ymax"]]  # keeps the manifest columns aligned with the required object-detection layout.
     manifest_df.to_csv(manifest_path, index=False)  # writes the manifest to a CSV file for easy inspection.
 
     print(f"Copied {copied_count} images into organized class folders.")  # Prints the total number of copied images.
