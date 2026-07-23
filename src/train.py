@@ -28,7 +28,7 @@ from dataloading_augmentation import dataset_path, train_transform  #import the 
 #it also saves simple plots so the training behavior is easy to inspect.
 ROOT = Path(__file__).resolve().parent.parent  # resolve the repository root from the current file location.
 IMAGES_DIR = dataset_path  #store the image directory that should be used for training.
-LABELS_PATH = dataset_path / "valid" / "_annotations.csv"  # build the path to the new annotation CSV from the selected image folder.
+LABELS_PATH = ROOT / "new_data" / "archive" / "valid" / "_annotations.csv"  # build the path to the annotation CSV from the dataset root.
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")  # choose the GPU if it is available, otherwise use the CPU.
 BATCH_SIZE = 32  # set the batch size for mini-batch training.
