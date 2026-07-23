@@ -2,6 +2,7 @@ import tempfile  # imports tempfile so a temporary dataset can be created for te
 import unittest  #imports unittest so the helper functions can be verified with automated tests.
 from pathlib import Path  
 
+import pandas as pd  # imports pandas so annotation CSVs can be written for the regression test.
 from PIL import Image  # imports Pillow so the temporary test image can be written as a real image file.
 
 from src.preprocessing import class_name_from_filename, prepare_classified_dataset  # Imports the preprocessing helpers that need to be tested.
@@ -25,19 +26,26 @@ class PreprocessingTests(unittest.TestCase):  # creates a unittest class for the
             source_file = images_dir / "a--1-_jpg.rf.test.jpg"  #creates a fake source image file in the temporary images directory.
             Image.new("RGB", (32, 32), color="white").save(source_file)  #writes a valid image file so the preprocessing step can read its size.
 
+            annotations_path = output_dir / "annotations.csv"  #creates the annotations CSV path inside the temporary output directory.
+            pd.DataFrame([
+                {"filename": source_file.name, "width": 32, "height": 32, "class": "Microplastic", "xmin": 2, "ymin": 4, "xmax": 10, "ymax": 12},
+                {"filename": source_file.name, "width": 32, "height": 32, "class": "Microplastic", "xmin": 15, "ymin": 8, "xmax": 28, "ymax": 24},
+            ]).to_csv(annotations_path, index=False)  #writes two object annotations for the same image.
+
             manifest_path = output_dir / "dataset_manifest.csv"  #creates the manifest CSV path inside the temporary output directory.
 
             result_dir, manifest_path = prepare_classified_dataset(  #  preprocessing function on the temporary dataset.
                 dataset_root=root,  #Passes temporary dataset root.
                 output_dir=output_dir,  #Passes temporary output directory.
-                annotations_path=manifest_path,  #passes the manifest path to the preprocessing function.
+                annotations_path=annotations_path,  #passes the annotation CSV to the preprocessing function.
             )
 
             self.assertTrue((result_dir / "ClassA" / source_file.name).exists())  #confirms that the image was copied into the ClassA folder.
             self.assertTrue(manifest_path.exists())  #confims that the manifest file was created.
-            manifest = manifest_path.read_text(encoding="utf-8")  #reads the manifest file contents.
-            self.assertIn("filename", manifest)  #Confirms that the manifest contains the filename column.
-            self.assertIn("ClassA", manifest)  #Confirms that the manifest includes the expected class label.
+            manifest = pd.read_csv(manifest_path)  #reads the manifest file contents as a DataFrame.
+            self.assertEqual(len(manifest), 2)  #confirms that each annotated microplastic becomes its own manifest row.
+            self.assertEqual(manifest.iloc[0]["xmin"], 2)  #confirms that the first bounding box is preserved.
+            self.assertEqual(manifest.iloc[1]["xmax"], 28)  #confirms that the second bounding box is preserved.
 
 
 # runs the unittest suite when the file is executed directly.

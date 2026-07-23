@@ -7,7 +7,7 @@ from PIL import Image  # PIL so the image width and height can be read directly 
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent  #resolves the repository root from the script location so the paths work on GitHub and any machine.
-DEFAULT_DATASET_ROOT = REPO_ROOT / "data" / "microplastic-dataset-for-computer-vision"  #sets the default dataset root inside the repository.
+DEFAULT_DATASET_ROOT = REPO_ROOT / "new_data" / "archive"  #uses the new dataset root inside the repository.
 DEFAULT_OUTPUT_DIR = DEFAULT_DATASET_ROOT / "organized_images"  #sets the default output folder for the organized image classes.
 
 
@@ -37,7 +37,7 @@ def prepare_classified_dataset(dataset_root: Path | str = DEFAULT_DATASET_ROOT, 
     if annotations_path is not None:  # keeps the parameter available for compatibility but does not use it as the main source of truth anymore.
         annotations_path = Path(annotations_path)  # converts the passed path into a pathlib Path object.
 
-    image_root = dataset_root / "images"  # points to the original images directory inside the dataset root.
+    image_root = dataset_root / "train"  # points to the new training image directory inside the dataset root.
     if not image_root.exists():  # raises an error if the original images folder is missing.
         raise FileNotFoundError(f"Image root not found: {image_root}")  
 

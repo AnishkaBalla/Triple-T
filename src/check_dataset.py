@@ -6,12 +6,12 @@ from PIL import Image
 import time
 
 repo_root = Path(__file__).resolve().parent.parent
-organized_images_dir = repo_root / "data" / "microplastic-dataset-for-computer-vision" / "organized_images"
-manifest_file = organized_images_dir / "dataset_manifest.csv"
+organized_images_dir = repo_root / "new_data" / "archive" / "train"
+manifest_file = repo_root / "new_data" / "archive" / "valid" / "_annotations.csv"
 manifest = pd.read_csv(manifest_file)
 print(manifest.head()) #the manifest now contains the image metadata that the training pipeline uses
 
-image_folder = [organized_images_dir, organized_images_dir / "ClassA"]
+image_folder = [organized_images_dir]
 images = []
 for folder in image_folder: 
     images.extend(os.listdir(folder))
@@ -35,6 +35,13 @@ print(manifest["box_width"].describe())
 print("\nBounding Box Height Stats:")
 print(manifest["box_height"].describe())
 #plotting boundary box distributions
+print(manifest[[
+    "filename",
+    "xmin",
+    "ymin",
+    "xmax",
+    "ymax"
+]].head(20))
 
 plt.hist(manifest["box_width"], bins=20)
 plt.title("Microplastic Bounding Box Width Distribution")
