@@ -32,7 +32,7 @@ LABELS_PATH = dataset_path.parent / "labels" / "cleaned_annotations.csv"  # buil
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")  # choose the GPU if it is available, otherwise use the CPU.
 BATCH_SIZE = 32  # set the batch size for mini-batch training.
-EPOCHS = 12  # set the number of training epochs.
+EPOCHS = 5  # set the number of training epochs.
 LEARNING_RATE = 0.001  # set the learning rate for the optimizer.
 
 
