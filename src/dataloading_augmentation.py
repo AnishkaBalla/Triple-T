@@ -7,12 +7,8 @@ from torch.utils.data import DataLoader
 
 train_transform = v2.Compose([
     v2.Resize((256, 256)),
-    v2.RandomHorizontalFlip(p=0.5),
-    v2.RandomVerticalFlip(p=0.5),
-    v2.RandomRotation(degrees=(-45, 45)),
-    v2.RandomAffine(degrees=0, scale=(0.8, 1.2)),
-    v2.ToImage(),                          # Converts PIL Image to Tensor
-    v2.ToDtype(torch.float32, scale=True)  # Normalizes pixel values to [0, 1]
+    v2.ToImage(),
+    v2.ToDtype(torch.float32, scale=True)
 ])
 
 from pathlib import Path #object oriented approach to handle filesystem paths
