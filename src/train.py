@@ -29,7 +29,7 @@ from checkpoint import log_results  #import the logging function to save trainin
 #it also saves simple plots so the training behavior is easy to inspect.
 ROOT = Path(__file__).resolve().parent.parent  # resolve the repository root from the current file location.
 IMAGES_DIR = dataset_path  #store the image directory that should be used for training.
-LABELS_PATH = ROOT / "new_data" / "archive" / "valid" / "_annotations.csv"  # build the path to the annotation CSV from the dataset root.
+LABELS_PATH = ROOT / "new_data" / "archive" / "train" / "_annotations.csv"  # build the path to the annotation CSV from the dataset root.
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")  # choose the GPU if it is available, otherwise use the CPU.
 BATCH_SIZE = 32  # set the batch size for mini-batch training.
@@ -65,8 +65,8 @@ class BoxDataset(Dataset):  # inherit from PyTorch's Dataset class so it works w
         target = torch.zeros((MAX_OBJECTS, 5), dtype=torch.float32)
 
         # look for all annotation rows matching this image file name.
-        rows = self.labels_df[self.labels_df["filename"] == path.name]
-
+        rows = self.labels_df[self.labels_df["filename"].apply(lambda x: Path(str(x)).stem) == path.stem]
+        
         # loop through every microplastic annotation for this image.
         for i, (_, r) in enumerate(rows.iterrows()):
 
@@ -269,13 +269,63 @@ def visualize_predictions(model, loader, device):
         for images, targets, paths in loader:
             preds = model(images.to(device))
             preds = preds[0].cpu()   # all 28 predictions for first image
+            preds[:,0:4] = torch.sigmoid(preds[:,0:4])
+            preds[:,4] = torch.sigmoid(preds[:,4])
+
+
             target = targets[0]
             path = paths[0]
 
             confidence_threshold = 0.5
+            preds[:,4] = torch.sigmoid(preds[:,4])
             preds = preds[preds[:,4] > confidence_threshold]
-            print("Image:", path)
-            print("Predicted boxes:", preds)
+
+            #showing image
+            image = Image.open(path).convert("RGB")
+            fig, ax = plt.subplots(figsize = (8,8))
+            ax.imshow(image)
+
+            #drawing boxes (green being ground, red being predicted)
+            import matplotlib.patches as patches 
+            for box in target:
+                if box[4] == 0:
+                    continue
+                xmin, ymin, xmax, ymax = convert_norm_to_corners(box[:4].tolist())
+                w, h = image.size
+                xmin *= w
+                xmax *= w
+                ymin *= h
+                ymax *= h
+
+                rect = patches.Rectangle(
+                    (xmin, ymin), 
+                    xmax - xmin, ymax - ymin, 
+                    edgecolor = "green", 
+                    facecolor = "none", 
+                    linewidth = 2
+                )
+                ax.add_patch(rect)
+            for box in preds:
+                if box[4] == 0:
+                    continue
+                xmin, ymin, xmax, ymax = convert_norm_to_corners(box[:4].tolist())
+                w, h = image.size
+                xmin *= w
+                xmax *= w
+                ymin *= h
+                ymax *= h
+
+                rect = patches.Rectangle(
+                    (xmin, ymin), 
+                    xmax - xmin, ymax - ymin, 
+                    edgecolor = "red", 
+                    facecolor = "none", 
+                    linewidth = 2
+                )
+                ax.add_patch(rect)
+            plt.savefig("prediction_example.png")
+            plt.close()
+
 
 # define the main training workflow.
 def main():  #trianing pipeline
@@ -371,7 +421,8 @@ def main():  #trianing pipeline
     evaluate_model(model, test_loader, DEVICE)  # Evaluate the trained model on the test set.
     visualize_predictions(model, test_loader, DEVICE) #visualize boxes
     print("Saving the trained model...")  # Print a message before saving the model weights.
-    torch.save(model.state_dict(), "customCNN.pt")  # Save the trained model state dictionary to a file.
+    if val_losses[-1] == min(val_losses):
+        torch.save(model.state_dict(), "best_customCNN.pt")  # Save the best trained model state dictionary to a file.
 
     
     
