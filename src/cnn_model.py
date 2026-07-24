@@ -4,7 +4,7 @@ import torch.nn as nn
 # this model predicts one box per image
 # it is small and easy to train
 class CustomCNN(nn.Module):
-    def __init__(self, max_objects=1):
+    def __init__(self, max_objects=28):
         super().__init__()
         self.max_objects = max_objects
         # this is the simple cnn layout

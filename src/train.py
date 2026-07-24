@@ -57,22 +57,48 @@ class BoxDataset(Dataset):  # inherit from PyTorch's Dataset class so it works w
         image = Image.open(path).convert("RGB")  # open the image and convert it to RGB so it has three channels.
         if self.transform:  # apply the transform pipeline (if provided)
             image = self.transform(image)  
+        MAX_OBJECTS = 28  # define the maximum number of microplastics that one image can contain.
 
-        row = self.labels_df[self.labels_df["filename"] == path.name]  # look for any annotation rows matching this image file name.
-        if row.empty:  # if there is no annotation for this image, treat it as a background example.
-            target = torch.tensor([0.0, 0.0, 0.0, 0.0, 0.0], dtype=torch.float32)  # create an empty target vector (similar to YOLO!) with zeroed box coordinates and confidence.
-        else:  # If there is an annotation row for the image, convert it into a normalized target box.
-            r = row.iloc[0]  # grab the first matching row for the image.
-            x1, y1, x2, y2 = r["xmin"], r["ymin"], r["xmax"], r["ymax"]  # pull the box coordinates from the annotation row.
-            width, height = r["width"], r["height"]  # pull the image width and height from the annotation row.
-            cx = ((x1 + x2) / 2) / width  # compute the normalized center x coordinate of the box.
-            cy = ((y1 + y2) / 2) / height  #compute the normalized center y coordinate of the box.
-            bw = (x2 - x1) / width  # compute the normalized box width.
-            bh = (y2 - y1) / height  #compute the normalized box height.
-            target = torch.tensor([cx, cy, bw, bh, 1.0], dtype=torch.float32)  #create a target tensor with the normalized box and confidence 1.
+        # create an empty target tensor for 28 possible objects.
+        # each object contains [x_center, y_center, width, height, confidence].
+        target = torch.zeros((MAX_OBJECTS, 5), dtype=torch.float32)
 
-        return image, target  # Return the processed image and target tensor.
+        # look for all annotation rows matching this image file name.
+        rows = self.labels_df[self.labels_df["filename"] == path.name]
 
+        # loop through every microplastic annotation for this image.
+        for i, (_, r) in enumerate(rows.iterrows()):
+
+            # stop adding objects if the image contains more than 28 microplastics.
+            if i >= MAX_OBJECTS:
+                break
+
+            # pull the box coordinates from the annotation row.
+            x1, y1, x2, y2 = r["xmin"], r["ymin"], r["xmax"], r["ymax"]
+
+            # pull the image width and height from the annotation row.
+            width, height = r["width"], r["height"]
+
+            # compute the normalized center x coordinate of the box.
+            cx = ((x1 + x2) / 2) / width
+
+            # compute the normalized center y coordinate of the box.
+            cy = ((y1 + y2) / 2) / height
+
+            # compute the normalized box width.
+            bw = (x2 - x1) / width
+
+            # compute the normalized box height.
+            bh = (y2 - y1) / height
+
+            # store this microplastic's box and confidence into the correct object slot.
+            target[i] = torch.tensor(
+                [cx, cy, bw, bh, 1.0],
+                dtype=torch.float32
+            )
+
+        # return the processed image, all 28 possible object labels, and image path for visualization.
+        return image, target, str(path)
 
 # Define a helper that plots the training and validation loss curves.
 def plot_training_history(train_losses, val_losses):  # Accept the recorded training and validation losses.
@@ -110,35 +136,131 @@ def plot_confusion_matrix(y_true, y_pred):  # Accept the true labels and predict
     print("saved confusion matrix to confusion_matrix.png")  
     plt.close()  
 
+def convert_norm_to_corners(box):
+    # converting [cx, cy, w, h] to [xmin, ymin, xmax, ymax]
+    cx, cy,w,h = box
+    xmin = cx - w / 2
+    ymin = cy - h / 2
+    xmax = cx + w / 2
+    ymax = cy + h / 2
+
+    return [xmin, ymin, xmax, ymax]
+
+#calculate IoU - box1 and box2 should both be in [xmin, ymin...] format
+def calculate_iou(box1, box2):
+    xA = max(box1[0], box2[0])
+    yA = max(box1[1], box2[1])
+    xB = min(box1[2], box2[2])
+    yB = min(box1[3], box2[3])
+
+    intersection = max(0, xB - xA) * max(0, yB - yA)
+
+    area1 = (box1[2] - box1[0]) * (box1[3] - box1[1])
+    area2 = (box2[2] - box2[0]) * (box2[3] - box2[1])
+
+    union = area1 + area2 - intersection
+
+    if union == 0:
+        return 0.0
+
+    return intersection / union #area of overlap over union
 
 #define a helper that evaluates the trained model using common classification metrics.
 def evaluate_model(model, loader, device):  # Accept the trained model, evaluation loader, and device.
     model.eval()  #put the model into evaluation mode so dropout and batch norm behave predictably.
+
     all_true = []  #empty list to collect true labels from all batches.
     all_pred = []  # create an empty list to collect predicted labels from all batches.
+    ious = [] #empty list of IoU
+
     with torch.no_grad():  # disable gradient tracking during evaluation to save memory.
-        for images, targets in loader:  #loop over each batch from the validation loader.
+        for images, targets, _ in loader:  #loop over each batch from the validation loader.
+
             images = images.to(device)  # move the input images to the selected device.
-            preds = model(images)[:, 0, :]  # extract the model prediction for the first object slot.
-            probs = torch.sigmoid(preds[:, 4]).cpu()  # convert the confidence logit -> probability.
-            pred_labels = (probs >= 0.5).long()  # Convert the probability -> binary label.
-            true_labels = (targets[:, 4] >= 0.5).long().cpu()  # Convert the target confidence into a binary label.
-            all_true.append(true_labels)  #  true labels for later aggregation.
-            all_pred.append(pred_labels)  # predicted labels for later aggregation.
+
+            preds = model(images)  # get all 28 predictions from the model.
+
+            pred_boxes = preds[:, :, :4].cpu() #extract predicted boxes for all 28 objects.
+            pred_conf = preds[:, :, 4].cpu() #extract confidence for all 28 objects.
+
+            target_boxes = targets[:, :, :4] #extract target boxes for all 28 objects.
+            target_conf = targets[:, :, 4] #extract target confidence for all 28 objects.
+
+
+            # calculate IoU for every object slot
+            for batch in range(preds.shape[0]):
+
+                for obj in range(28):
+
+                    # only calculate IoU if ground truth object exists
+                    if target_conf[batch][obj] == 0:
+                        continue
+
+                    pred_xyxy = convert_norm_to_corners(
+                        pred_boxes[batch][obj].tolist()
+                    )
+
+                    gt_xyxy = convert_norm_to_corners(
+                        target_boxes[batch][obj].tolist()
+                    )
+
+                    iou = calculate_iou(pred_xyxy, gt_xyxy)
+                    ious.append(iou)
+
+
+            # classification metrics
+            probs = torch.sigmoid(pred_conf)
+
+            # if any of the 28 boxes predicts an object, image contains microplastic
+            pred_labels = (probs.max(dim=1)[0] >= 0.5).long()
+
+            # if any ground truth slot contains an object
+            true_labels = (target_conf.max(dim=1)[0] >= 0.5).long()
+
+
+            all_true.append(true_labels)
+            all_pred.append(pred_labels)
+
 
     y_true = torch.cat(all_true).numpy()  #all true labels -> one array.
     y_pred = torch.cat(all_pred).numpy()  # all predicted labels ->one array.
+
+
     acc = accuracy_score(y_true, y_pred)  # accuracy
     prec = precision_score(y_true, y_pred, zero_division=0)  # precision 
     rec = recall_score(y_true, y_pred, zero_division=0)  # recall
     f1 = f1_score(y_true, y_pred, zero_division=0)  # F1 score
 
+
     print("accuracy:", round(acc, 4))  # rounded accuracy score.
     print("precision:", round(prec, 4))  #rounded precision score.
     print("recall:", round(rec, 4))  # rounded recall score.
     print("f1 score:", round(f1, 4))  #rounded F1 score.
-    plot_confusion_matrix(y_true, y_pred)  #plot the confusion matrix using the aggregated labels.
 
+
+    if len(ious)>0:
+        print("Mean IoU:", round(sum(ious) / len(ious), 4))
+    else:
+        print("No IoUs")
+
+
+    plot_confusion_matrix(y_true, y_pred)  #plot the confusion matrix using the aggregated labels.
+#visualization!
+def visualize_predictions(model, loader, device):
+    model.eval()
+
+    with torch.no_grad(): #disable gradients to make sure you dont update the model
+
+        for images, targets, paths in loader:
+            preds = model(images.to(device))
+            preds = preds[0].cpu()   # all 28 predictions for first image
+            target = targets[0]
+            path = paths[0]
+
+            confidence_threshold = 0.5
+            preds = preds[preds[:,4] > confidence_threshold]
+            print("Image:", path)
+            print("Predicted boxes:", preds)
 
 # define the main training workflow.
 def main():  #trianing pipeline
@@ -148,8 +270,8 @@ def main():  #trianing pipeline
     train_files, test_files = train_test_split(image_paths, test_size=0.3, random_state=42)  # Split the image paths into train and test sets.
     train_loader = make_loader(train_files, labels_df, BATCH_SIZE, shuffle=True)  # Create the training DataLoader.
     test_loader = make_loader(test_files, labels_df, BATCH_SIZE, shuffle=False)  # Create the test DataLoader.
-
-    model = CustomCNN(max_objects=1).to(DEVICE)  # Create the CNN model and move it to the selected device.
+    MAX_OBJECTS = 28
+    model = CustomCNN(max_objects=MAX_OBJECTS).to(DEVICE)  # Create the CNN model and move it to the selected device.
     optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)  # Create the Adam optimizer for training.
     box_loss_fn = torch.nn.SmoothL1Loss()  # Create the loss function for bounding box regression.
     conf_loss_fn = torch.nn.BCEWithLogitsLoss()  # Create the loss function for the presence confidence.
@@ -160,18 +282,17 @@ def main():  #trianing pipeline
     for epoch in range(EPOCHS):  # Loop over the configured number of epochs.
         model.train()  # Set the model to training mode so dropout is active.
         train_loss = 0.0  # Reset the cumulative training loss for the epoch.
-        for images, targets in train_loader:  # Loop over each training batch.
+        for images, targets, _ in train_loader:  # Loop over each training batch.
             images, targets = images.to(DEVICE), targets.to(DEVICE)  # Move the batch to the selected device.
             optimizer.zero_grad()  # Clear old gradients before the backward pass.
-            preds = model(images)[:, 0, :]  #Run the images through the model and take the first object prediction.
-            pred_boxes = preds[:, :4]  # Extract the predicted box coordinates from the model output.
-            pred_conf_logits = preds[:, 4]  #Extract the predicted confidence logit from the model output.
-            target_boxes = targets[:, :4]  # Extract the target box coordinates from the labels.
-            target_conf = targets[:, 4]  # Extract the target confidence value from the labels.
-
-            box_loss_raw = F.smooth_l1_loss(pred_boxes, target_boxes, reduction="none").mean(dim=1)  # Compute elementwise box regression loss for each sample.
-            box_loss = (box_loss_raw * target_conf).mean()  # Weight the box loss by whether the sample actually contains an object.
-            conf_loss = conf_loss_fn(pred_conf_logits, target_conf)  # Compute the binary confidence loss.
+            preds = model(images)
+            pred_boxes = preds[:, :, :4]
+            pred_conf_logits = preds[:, :, 4]
+            target_boxes = targets[:, :, :4]
+            target_conf = targets[:, :, 4]
+            box_loss_raw = F.smooth_l1_loss(pred_boxes, target_boxes, reduction="none")  # Compute elementwise box regression loss for each sample.
+            box_loss = (box_loss_raw.mean(dim=2) * target_conf).mean()  # Weight the box loss by whether the sample actually contains an object.
+            conf_loss = conf_loss_fn(pred_conf_logits,target_conf)  # Compute the binary confidence loss.
             loss = conf_loss + box_loss  # Combine the confidence loss and box loss into one overall loss.
 
             loss.backward()  # Backpropagate the training loss through the network.
@@ -181,16 +302,18 @@ def main():  #trianing pipeline
         model.eval()  # Switch the model back to evaluation mode for validation.
         val_loss = 0.0  # Reset the cumulative validation loss for the epoch.
         with torch.no_grad():  # Disable gradient tracking during validation.
-            for images, targets in test_loader:  # Loop over each validation batch.
+            for images, targets, _ in test_loader:  # Loop over each validation batch.
                 images, targets = images.to(DEVICE), targets.to(DEVICE)  # Move the validation batch to the selected device.
-                preds = model(images)[:, 0, :]  # Run the validation images through the model.
-                pred_boxes = preds[:, :4]  # Extract the predicted box coordinates from the model output.
-                pred_conf_logits = preds[:, 4]  # Extract the predicted confidence logit from the model output.
-                target_boxes = targets[:, :4]  # Extract the target box coordinates from the labels.
-                target_conf = targets[:, 4]  # Extract the target confidence value from the labels.
+                preds = model(images)  # Run the images through the model and get all 28 object predictions.
+                pred_boxes = preds[:, :, :4]  # Extract bounding boxes for all 28 predictions.
+                pred_conf_logits = preds[:, :, 4]  # Extract confidence values for all 28 predictions.
+                target_boxes = targets[:, :, :4]  # Extract ground truth boxes for all 28 objects.
+                target_conf = targets[:, :, 4]  # Extract confidence labels for all 28 objects.
+                box_loss_raw = F.smooth_l1_loss(pred_boxes,target_boxes,reduction="none")
 
-                box_loss_raw = F.smooth_l1_loss(pred_boxes, target_boxes, reduction="none").mean(dim=1)  # Compute the box loss again for the validation data.
-                box_loss = (box_loss_raw * target_conf).mean()  # Weight the box loss by the presence label.
+                # average x,y,w,h errors for each object
+                box_loss = (box_loss_raw.mean(dim=2) * target_conf).mean()
+
                 conf_loss = conf_loss_fn(pred_conf_logits, target_conf)  # Compute the confidence loss for the validation data.
                 loss = conf_loss + box_loss  # Combine the confidence and box losses for validation.
                 val_loss += loss.item()  # Add the current validation batch loss to the epoch total.
@@ -202,10 +325,12 @@ def main():  #trianing pipeline
     plot_training_history(train_losses, val_losses)  # Plot the saved training and validation loss curves.
     print("training finished")  #Print a completion message for the overall training loop.
     evaluate_model(model, test_loader, DEVICE)  # Evaluate the trained model on the test set.
-
+    visualize_predictions(model, test_loader, DEVICE) #visualize boxes
     print("Saving the trained model...")  # Print a message before saving the model weights.
     torch.save(model.state_dict(), "customCNN.pt")  # Save the trained model state dictionary to a file.
 
+    
+    
 
 #Run the training workflow when the script is executed directly.
 if __name__ == "__main__":  # Check whether the file is being run as a script.
