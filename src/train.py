@@ -23,6 +23,7 @@ except ModuleNotFoundError:
 
 from cnn_model import CustomCNN  #import the custom CNN architecture defined in the model file (cnn_model.py).
 from dataloading_augmentation import dataset_path, train_transform  #import the selected image root and the shared image transform pipeline.
+from checkpoint import log_results  #import the logging function to save training metrics to CSV.
 
 # this script trains a lightweight CNN to predict whether an image contains a microplastic object and where the box is located.
 #it also saves simple plots so the training behavior is easy to inspect.
@@ -100,14 +101,28 @@ class BoxDataset(Dataset):  # inherit from PyTorch's Dataset class so it works w
         # return the processed image, all 28 possible object labels, and image path for visualization.
         return image, target, str(path)
 
-# Define a helper that plots the training and validation loss curves.
-def plot_training_history(train_losses, val_losses):  # Accept the recorded training and validation losses.
-    plt.figure(figsize=(6, 4))  # Create a new matplotlib figure with a moderate size.
+
+# Define a helper that plots the training, validation, and test loss curves.
+def plot_training_history(train_losses, val_losses, test_losses, train_box_losses=None, train_conf_losses=None, val_box_losses=None, val_conf_losses=None, test_box_losses=None, test_conf_losses=None):  # Accept the recorded training, validation, and test losses.
+    plt.figure(figsize=(10, 6))  # Create a new matplotlib figure with a larger size for more curves.
     plt.plot(train_losses, label="train loss", marker="o")  # Plot the training loss values with markers.
     plt.plot(val_losses, label="validation loss", marker="o")  # Plot the validation loss values with markers.
+    plt.plot(test_losses, label="test loss", marker="o")  # Plot the test loss values with markers.
+    if train_box_losses is not None:
+        plt.plot(train_box_losses, label="train box loss", marker="s", alpha=0.6)  # Plot training bounding box loss.
+    if val_box_losses is not None:
+        plt.plot(val_box_losses, label="validation box loss", marker="s", alpha=0.6)  # Plot validation bounding box loss.
+    if test_box_losses is not None:
+        plt.plot(test_box_losses, label="test box loss", marker="s", alpha=0.6)  # Plot test bounding box loss.
+    if train_conf_losses is not None:
+        plt.plot(train_conf_losses, label="train conf loss", marker="^", alpha=0.6)  # Plot training confidence loss.
+    if val_conf_losses is not None:
+        plt.plot(val_conf_losses, label="validation conf loss", marker="^", alpha=0.6)  # Plot validation confidence loss.
+    if test_conf_losses is not None:
+        plt.plot(test_conf_losses, label="test conf loss", marker="^", alpha=0.6)  # Plot test confidence loss.
     plt.xlabel("epoch")  # Label the x-axis with the epoch number.
     plt.ylabel("loss")  # Label the y-axis with loss.
-    plt.title("training and validation loss")  # Give the plot a descriptive title.
+    plt.title("training, validation, and test loss")  # Give the plot a descriptive title.
     plt.legend()  # Show the legend so each loss curve is identifiable.
     plt.grid(True, alpha=0.3)  # Add a faint grid to improve readability.
     plt.tight_layout()  # Adjust spacing so the plot is neatly arranged.
@@ -278,10 +293,19 @@ def main():  #trianing pipeline
 
     train_losses = []  # Create an empty list to record training losses per epoch.
     val_losses = []  #create an empty list to record validation losses per epoch.
+    test_losses = []  # Create an empty list to record test losses per epoch.
+    train_box_losses = []  # Create an empty list to record training bounding box losses per epoch.
+    train_conf_losses = []  # Create an empty list to record training confidence losses per epoch.
+    val_box_losses = []  # Create an empty list to record validation bounding box losses per epoch.
+    val_conf_losses = []  # Create an empty list to record validation confidence losses per epoch.
+    test_box_losses = []  # Create an empty list to record test bounding box losses per epoch.
+    test_conf_losses = []  # Create an empty list to record test confidence losses per epoch.
 
     for epoch in range(EPOCHS):  # Loop over the configured number of epochs.
         model.train()  # Set the model to training mode so dropout is active.
         train_loss = 0.0  # Reset the cumulative training loss for the epoch.
+        train_box_loss_epoch = 0.0  # Reset the cumulative training bounding box loss for the epoch.
+        train_conf_loss_epoch = 0.0  # Reset the cumulative training confidence loss for the epoch.
         for images, targets, _ in train_loader:  # Loop over each training batch.
             images, targets = images.to(DEVICE), targets.to(DEVICE)  # Move the batch to the selected device.
             optimizer.zero_grad()  # Clear old gradients before the backward pass.
@@ -298,12 +322,19 @@ def main():  #trianing pipeline
             loss.backward()  # Backpropagate the training loss through the network.
             optimizer.step()  #Update the model parameters using the optimizer.
             train_loss += loss.item()  # Add the current batch loss to the epoch total.
+            train_box_loss_epoch += box_loss.item()  # Add the current batch bounding box loss to the epoch total.
+            train_conf_loss_epoch += conf_loss.item()  # Add the current batch confidence loss to the epoch total.
 
         model.eval()  # Switch the model back to evaluation mode for validation.
         val_loss = 0.0  # Reset the cumulative validation loss for the epoch.
+        val_box_loss_epoch = 0.0  # Reset the cumulative validation bounding box loss for the epoch.
+        val_conf_loss_epoch = 0.0  # Reset the cumulative validation confidence loss for the epoch.
+        test_loss = 0.0  # Reset the cumulative test loss for the epoch.
+        test_box_loss_epoch = 0.0  # Reset the cumulative test bounding box loss for the epoch.
+        test_conf_loss_epoch = 0.0  # Reset the cumulative test confidence loss for the epoch.
         with torch.no_grad():  # Disable gradient tracking during validation.
-            for images, targets, _ in test_loader:  # Loop over each validation batch.
-                images, targets = images.to(DEVICE), targets.to(DEVICE)  # Move the validation batch to the selected device.
+            for images, targets, _ in test_loader:  # Loop over each validation and test batch.
+                images, targets = images.to(DEVICE), targets.to(DEVICE)  # Move the batch to the selected device.
                 preds = model(images)  # Run the images through the model and get all 28 object predictions.
                 pred_boxes = preds[:, :, :4]  # Extract bounding boxes for all 28 predictions.
                 pred_conf_logits = preds[:, :, 4]  # Extract confidence values for all 28 predictions.
@@ -316,13 +347,26 @@ def main():  #trianing pipeline
 
                 conf_loss = conf_loss_fn(pred_conf_logits, target_conf)  # Compute the confidence loss for the validation data.
                 loss = conf_loss + box_loss  # Combine the confidence and box losses for validation.
-                val_loss += loss.item()  # Add the current validation batch loss to the epoch total.
+                val_loss += loss.item()  # Add the current batch loss to the validation total.
+                val_box_loss_epoch += box_loss.item()  # Add the current batch bounding box loss to the validation total.
+                val_conf_loss_epoch += conf_loss.item()  # Add the current batch confidence loss to the validation total.
+                test_loss += loss.item()  # Add the current batch loss to the test total.
+                test_box_loss_epoch += box_loss.item()  # Add the current batch bounding box loss to the test total.
+                test_conf_loss_epoch += conf_loss.item()  # Add the current batch confidence loss to the test total.
 
         train_losses.append(train_loss / len(train_loader))  # Record the average training loss for the epoch.
         val_losses.append(val_loss / len(test_loader))  # Record the average validation loss for the epoch.
-        print(f"epoch {epoch + 1}/{EPOCHS} | train loss: {train_losses[-1]:.4f} | validation loss: {val_losses[-1]:.4f}")  # Print the epoch summary.
+        test_losses.append(test_loss / len(test_loader))  # Record the average test loss for the epoch.
+        train_box_losses.append(train_box_loss_epoch / len(train_loader))  # Record the average training bounding box loss for the epoch.
+        train_conf_losses.append(train_conf_loss_epoch / len(train_loader))  # Record the average training confidence loss for the epoch.
+        val_box_losses.append(val_box_loss_epoch / len(test_loader))  # Record the average validation bounding box loss for the epoch.
+        val_conf_losses.append(val_conf_loss_epoch / len(test_loader))  # Record the average validation confidence loss for the epoch.
+        test_box_losses.append(test_box_loss_epoch / len(test_loader))  # Record the average test bounding box loss for the epoch.
+        test_conf_losses.append(test_conf_loss_epoch / len(test_loader))  # Record the average test confidence loss for the epoch.
+        log_results(epoch + 1, train_losses[-1], val_losses[-1], test_losses[-1], LEARNING_RATE, train_box_losses[-1], train_conf_losses[-1], val_box_losses[-1], val_conf_losses[-1], test_box_losses[-1], test_conf_losses[-1])  # Log the epoch metrics to CSV.
+        print(f"epoch {epoch + 1}/{EPOCHS} | train loss: {train_losses[-1]:.4f} | val loss: {val_losses[-1]:.4f} | test loss: {test_losses[-1]:.4f}")  # Print the epoch summary.
 
-    plot_training_history(train_losses, val_losses)  # Plot the saved training and validation loss curves.
+    plot_training_history(train_losses, val_losses, test_losses, train_box_losses, train_conf_losses, val_box_losses, val_conf_losses, test_box_losses, test_conf_losses)  # Plot the saved training, validation, and test loss curves.
     print("training finished")  #Print a completion message for the overall training loop.
     evaluate_model(model, test_loader, DEVICE)  # Evaluate the trained model on the test set.
     visualize_predictions(model, test_loader, DEVICE) #visualize boxes

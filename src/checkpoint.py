@@ -35,7 +35,10 @@ class EarlyStopping:
         self.should_stop = True
 
 #logs training metrics to CSV file for analysing and stuff ;>
-def log_results(epoch, train_loss, val_loss, lr):
+def log_results(epoch, train_loss, val_loss, test_loss, lr, train_box_loss=None, train_conf_loss=None, val_box_loss=None, val_conf_loss=None, test_box_loss=None, test_conf_loss=None):
   filepath = 'src\\logs\\training_logs.csv'
   with open(filepath, 'a', newline='') as f:
-    csv.writer(f).writerow([epoch, train_loss, val_loss, lr])
+    row = [epoch, train_loss, val_loss, test_loss, lr]
+    if train_box_loss is not None:
+      row.extend([train_box_loss, train_conf_loss, val_box_loss, val_conf_loss, test_box_loss, test_conf_loss])
+    csv.writer(f).writerow(row)
