@@ -33,7 +33,7 @@ LABELS_PATH = ROOT / "new_data" / "archive" / "train" / "_annotations.csv"  # bu
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")  # choose the GPU if it is available, otherwise use the CPU.
 BATCH_SIZE = 32  # set the batch size for mini-batch training.
-EPOCHS = 2  # set the number of training epochs.
+EPOCHS = 20  # set the number of training epochs.
 LEARNING_RATE = 0.001  # set the learning rate for the optimizer.
 
 
@@ -276,7 +276,7 @@ def visualize_predictions(model, loader, device):
             target = targets[0]
             path = paths[0]
 
-            confidence_threshold = 0.5
+            confidence_threshold = 0.6
             preds[:,4] = torch.sigmoid(preds[:,4])
             preds = preds[preds[:,4] > confidence_threshold]
 

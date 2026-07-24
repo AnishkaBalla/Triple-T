@@ -1,5 +1,5 @@
 import torch
-from torchvision import transform
+from torchvision import transforms
 from PIL import Image
 from cnn_model import CustomCNN
 
@@ -13,15 +13,15 @@ model.eval() #notifies network that we r using this for testing
 
 
 #image preprocessing (resize to 256x256 and convert to tensor)
-transform_inference = transform.Compose([
-    transform.Resize((256, 256)), #resizing image to 256x256 since that was the size the images were during training
-    transform.ToTensor(),  #makes pixel values go from 0-255 to 0-1 and converts to tensor
+transforms_inference = transforms.Compose([
+    transforms.Resize((256, 256)), #resizing image to 256x256 since that was the size the images were during training
+    transforms.ToTensor(),  #makes pixel values go from 0-255 to 0-1 and converts to tensor
 ])
 
 
 def run_inference(image_path, conf_threshold=0.5):
     original_image = Image.open(image_path).convert("RGB") #convert to RGB since we trained the model on RGB images    
-    input_tensor = transform_inference(original_image).unsqueeze(0).to(device) #allows dimension to be a batch, for example [1, 3, 256, 256] instead of [3, 256, 256] (1 represents batch size)
+    input_tensor = transforms_inference(original_image).unsqueeze(0).to(device) #allows dimension to be a batch, for example [1, 3, 256, 256] instead of [3, 256, 256] (1 represents batch size)
    
     with torch.no_grad(): #makes sure torch dont run gradients since we not training rn
         outputs = model(input_tensor)
@@ -54,7 +54,7 @@ def run_inference(image_path, conf_threshold=0.5):
 
 
 #example test on random testing image, make sure to replace "random_testing_image.jpg" with the actual path to the test image
-result = run_inference("random_testing_image.jpg", conf_threshold=0.7)
+result = run_inference("data\microplastic-dataset-for-computer-vision\organized_images\ClassB\b--18-_jpg.rf.47619bec35dba029d567c6097eac49de.jpg", conf_threshold=0.7)
 print(f"Detected microplastics: {result['num_detections']}")
 print(f"Pixel Coordinates: {result['pixel_boxes']}")
 print(f"Confidence Scores: {result['confidence_scores']}")

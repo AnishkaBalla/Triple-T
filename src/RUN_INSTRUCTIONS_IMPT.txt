@@ -1,6 +1,21 @@
-1. preprocessing
-2. cnn_model
-3. train.py
-4. dataloading_augmentation
-5. checkpoint
-6. check_dataset
+Run the files in this order from the project root:
+
+1. preprocessing.py
+   - Run first to organize the raw images into class folders and create the dataset manifest.
+
+2. check_dataset.py
+   - Run second to verify that the labels and image files line up before training.
+
+3. cnn_model.py
+   - Run third to define the CNN architecture used by training.
+
+4. dataloading_augmentation.py
+   - Run fourth to set up the dataset path and image transforms used by training.
+
+5. checkpoint.py
+   - Run fifth to provide the checkpoint and early-stopping helpers used during training.
+
+6. train.py
+   - Run sixth to train the CNN model.
+
+7. test.py (THIS IS OPTIONAL -> only do if you want to test the model on a sample image.)
