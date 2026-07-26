@@ -1,4 +1,4 @@
-import torch
+﻿import torch
 import torch.nn as nn
 
 # this model predicts one box per image
@@ -25,7 +25,7 @@ class CustomCNN(nn.Module):
             nn.Linear(128, max_objects * 5),
         )
 
-    # this sends the image through the network
+    #this sends the image through the network
     def forward(self, x):
         x = self.net(x)
         x = x.view(-1, self.max_objects, 5)
