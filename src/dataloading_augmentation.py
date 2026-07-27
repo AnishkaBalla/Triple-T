@@ -1,34 +1,58 @@
-﻿import numpy as np  # math for annotation table
-import pandas as pd  # import pandas so the annotation csv can be read as a table.
-import torch  # data converted to tensors for training
-from torchvision.transforms import v2  #import torchvision transforms so images can be resized and normalized.
-from torchvision.datasets import ImageFolder  # import imagefolder so the organized class folders can be loaded as a dataset.
-from torch.utils.data import DataLoader  # import dataloader so batches of images can be fed to the model.
+﻿
+import numpy as np
+import pandas as pd
+import torch
+from pathlib import Path
+from torchvision.transforms import v2
+from torchvision.datasets import ImageFolder
+from torch.utils.data import DataLoader
+from torchvision.utils import save_image
 
-train_transform = v2.Compose([  # create a single transform pipeline for all training images.
-    v2.Resize((256, 256)),  #resize every image to a fixed shape so the model sees consistent input sizes.
-    v2.ToImage(),  # convert the image into a tensor-friendly image object.
-    v2.ToDtype(torch.float32, scale=True)  # convert the image values to float32 and scale them into the range 0 to 1.
+# basic image transform
+img_tfms = v2.Compose([
+    v2.Resize((256, 256)),
+    v2.ToImage(),
+    v2.ToDtype(torch.float32, scale=True),
 ])
 
-from pathlib import Path  # import path so filesystem locations can be handled in a portable way.
+microscopy_dataset = ImageFolder(
+    root=r"data\microplastic-dataset-for-computer-vision\organized_images",
+    transform=img_tfms,
+)
 
-repo_root = Path(__file__).resolve().parent.parent  #resolve the repository root from the current script location.
-dataset_root = repo_root / 'new_data' / 'archive'  # build the new dataset folder path relative to the repository root.
-organized_dataset_path = dataset_root / 'organized_images'  # point -> organized class-based image directory if it exists.
-dataset_path = organized_dataset_path if organized_dataset_path.exists() else dataset_root / 'train'  # use the organized folders when present, otherwise fall back to the train image root.
+# optional annotation loading
+try:
+    annotations_df = pd.read_csv(r"data\microplastic-dataset-for-computer-vision\labels\_annotations.csv")
+    numeric_df = annotations_df.apply(pd.to_numeric, errors="coerce")
+    annotation_tensors = torch.tensor(numeric_df.to_numpy(dtype=np.float32))
+    print("annotations loaded:", annotation_tensors.shape)
+except Exception as e:
+    print("annotations skipped:", e)
+    annotation_tensors = None
 
-if not dataset_path.exists():  #if neither the organized folder nor the train root exists at the repository path, fall back to the current working directory.
-    dataset_path = Path.cwd() / 'new_data' / 'archive' / 'train'  # build relative fallback train path from the current working directory.
+# augmentation pipeline
+train_transform = v2.Compose([
+    v2.Resize((256, 256)),
+    v2.RandomHorizontalFlip(p=0.5),
+    v2.RandomVerticalFlip(p=0.5),
+    v2.RandomRotation(degrees=(-45, 45)),
+    v2.RandomAffine(degrees=0, scale=(0.8, 1.2)),
+    v2.ToImage(),
+    v2.ToDtype(torch.float32, scale=True),
+])
 
+train_dataset = ImageFolder(
+    root=r"data\microplastic-dataset-for-computer-vision\organized_images",
+    transform=train_transform,
+)
 
-train_dataset = ImageFolder(root=dataset_path, transform=train_transform)  # pytorch dataset from the selected image root folder.
+train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
 
-train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)  # data loader that batches images and shuffles them during training.
+print("dataset size:", len(train_dataset))
 
-manifest_path = dataset_root / 'valid' / '_annotations.csv'  #read the annotation csv from the dataset root.
-annotations_df = pd.read_csv(manifest_path)  # read the annotation csv from the dataset folder.
+save_dir = Path(r"data\augmented_images")
+save_dir.mkdir(parents=True, exist_ok=True)
 
-numeric_annotations = annotations_df.select_dtypes(include=[np.number]).fillna(0)  # keep only the numeric columns from the manifest table and fill missing values with zero for stable tensor conversion.
-annotation_tensors = torch.tensor(numeric_annotations.values, dtype=torch.float32)  # convert the numeric annotation values into a pytorch tensor.
-
+for i, (images, labels) in enumerate(train_loader):
+    for j, img in enumerate(images):
+        save_image(img, save_dir / f"aug_{i}_{j}.png")
