@@ -1,21 +1,39 @@
-Run the files in this order from the project root:
+Run files from the project root in this order.
 
-1. preprocessing.py
-   - Run first to organize the raw images into class folders and create the dataset manifest.
+1. src/preprocessing.py
+   - Run first to organize images into class folders and create dataset_manifest.csv.
 
-2. check_dataset.py
-   - Run second to verify that the labels and image files line up before training.
+2. src/check_dataset.py
+   - Run second to verify image/annotation alignment and inspect bounding-box distributions.
 
-3. cnn_model.py
-   - Run third to define the CNN architecture used by training.
+3. src/dataloading_augmentation.py
+   - Run third to verify dataset path selection and shared transforms.
+   - This file is also imported by training.
 
-4. dataloading_augmentation.py
-   - Run fourth to set up the dataset path and image transforms used by training.
+4. src/train.py
+   - Run fourth to train the model, compute evaluation metrics, save plots, and save best weights.
+   - Imports src/cnn_model.py and src/checkpoint.py automatically.
 
-5. checkpoint.py
-   - Run fifth to provide the checkpoint and early-stopping helpers used during training.
+5. src/test.py (optional)
+   - Run after training to test inference on one sample image using saved model weights.
 
-6. train.py
-   - Run sixth to train the CNN model.
+6. src/visualization.py (optional)
+   - Run after training to generate and save visualization output from model predictions.
 
-7. test.py (THIS IS OPTIONAL -> only do if you want to test the model on a sample image.)
+7. src/contour_detection.py (optional utility)
+   - Use after you have model predictions to estimate particle contours and geometry.
+   - This is a utility module and is normally imported/called from another script.
+
+8. src/app.py (optional UI)
+   - Run last if you want the Streamlit interface for uploading and viewing images.
+
+9. src/cnn_model.py
+   - Model-definition module used by training/testing/visualization.
+   - Usually not run directly.
+
+10. src/checkpoint.py
+   - Logging/checkpoint helper module used by training.
+   - Usually not run directly.
+
+11. src/logs/training_logs.csv
+   - Output log file written by training (not an executable script).

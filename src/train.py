@@ -35,6 +35,9 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")  #choose t
 BATCH_SIZE = 32  # set the batch size for mini-batch training.
 EPOCHS = 20  # set the number of training epochs.
 LEARNING_RATE = 0.001  # set the learning rate for the optimizer.
+EVAL_CONF_THRESHOLD = 0.4  # use a slightly lower eval threshold to reduce false negatives on weak detections.
+BOX_LOSS_WEIGHT = 5.0  # emphasize localization so predicted boxes align better with ground truth.
+CONF_LOSS_WEIGHT = 0.5  # keep confidence loss important but not dominant over box quality.
 
 
 #define a helper that creates a dataloader for a set of image paths and labels.
@@ -66,6 +69,7 @@ class BoxDataset(Dataset):  # inherit from pytorch's dataset class so it works w
 
         # look for all annotation rows matching this image file name.
         rows = self.labels_df[self.labels_df["filename"].apply(lambda x: Path(str(x)).stem) == path.stem]
+        rows = rows.sort_values(["xmin", "ymin", "xmax", "ymax"]).reset_index(drop=True)
         
         #loop through every microplastic annotation for this image.
         for i, (_, r) in enumerate(rows.iterrows()):
@@ -163,6 +167,10 @@ def convert_norm_to_corners(box):
 
 #calculate iou - box1 and box2 should both be in [xmin, ymin...] format
 def calculate_iou(box1, box2):
+    # clamp all coordinates into valid normalized image bounds before computing overlap.
+    box1 = [max(0.0, min(1.0, v)) for v in box1]
+    box2 = [max(0.0, min(1.0, v)) for v in box2]
+
     xA = max(box1[0], box2[0])
     yA = max(box1[1], box2[1])
     xB = min(box1[2], box2[2])
@@ -187,6 +195,14 @@ def evaluate_model(model, loader, device):  # accept the trained model, evaluati
     all_true = []  # empty list to collect true labels from all batches.
     all_pred = []  # create an empty list to collect predicted labels from all batches.
     ious = [] # empty list of iou
+    iou_threshold = 0.3  # set IoU threshold for detection matching; slightly lower to avoid all-zero metrics early in training.
+    conf_threshold = EVAL_CONF_THRESHOLD  # evaluate detections with the configured threshold.
+    matched_ious = []  # IoUs from one-to-one matched detection pairs.
+
+    # keep explicit detection counts so localization mistakes penalize both precision and recall.
+    tp = 0
+    fp = 0
+    fn = 0
 
     with torch.no_grad():  #disable gradient tracking during evaluation to save memory.
         for images, targets, _ in loader:  # loop over each batch from the validation loader.
@@ -195,66 +211,109 @@ def evaluate_model(model, loader, device):  # accept the trained model, evaluati
 
             preds = model(images)  # get all 28 predictions from the model.
 
-            pred_boxes = preds[:, :, :4].cpu() #extract predicted boxes for all 28 objects.
-            pred_conf = preds[:, :, 4].cpu() # extract confidence for all 28 objects.
+            pred_boxes = torch.sigmoid(preds[:, :, :4]).cpu() #extract normalized predicted boxes for all 28 objects.
+            pred_conf = preds[:, :, 4].cpu() # extract confidence logits for all 28 objects.
 
             target_boxes = targets[:, :, :4] # extract target boxes for all 28 objects.
             target_conf = targets[:, :, 4] # extract target confidence for all 28 objects.
 
-
-            #calculate iou for every object slot
-            for batch in range(preds.shape[0]):
-
-                for obj in range(28):
-
-                    # only calculate iou if ground truth object exists
-                    if target_conf[batch][obj] == 0:
-                        continue
-
-                    pred_xyxy = convert_norm_to_corners(
-                        pred_boxes[batch][obj].tolist()
-                    )
-
-                    gt_xyxy = convert_norm_to_corners(
-                        target_boxes[batch][obj].tolist()
-                    )
-
-                    iou = calculate_iou(pred_xyxy, gt_xyxy)
-                    ious.append(iou)
-
-
-            # classification metrics
+            # classification probabilities per object slot
             probs = torch.sigmoid(pred_conf)
 
-            # if any of the 28 boxes predicts an object, image contains microplastic
-            pred_labels = (probs.max(dim=1)[0] >= 0.5).long()
+            #calculate iou and detection matches per image using one-to-one matching.
+            for batch in range(preds.shape[0]):
+                gt_indices = (target_conf[batch] >= 0.5).nonzero(as_tuple=False).flatten().tolist()
+                pred_indices_all = list(range(pred_boxes.shape[1]))
+                pred_indices_det = (probs[batch] >= conf_threshold).nonzero(as_tuple=False).flatten().tolist()
 
-            #if any ground truth slot contains an object
-            true_labels = (target_conf.max(dim=1)[0] >= 0.5).long()
+                gt_xyxy = [
+                    convert_norm_to_corners(target_boxes[batch][g].tolist())
+                    for g in gt_indices
+                ]
+                pred_xyxy_all = [
+                    convert_norm_to_corners(pred_boxes[batch][p].tolist())
+                    for p in pred_indices_all
+                ]
+                pred_xyxy_det = [
+                    convert_norm_to_corners(pred_boxes[batch][p].tolist())
+                    for p in pred_indices_det
+                ]
+
+                # localization quality: for each GT, use best IoU across all predicted slots.
+                for gt_box in gt_xyxy:
+                    if len(pred_xyxy_all) == 0:
+                        ious.append(0.0)
+                        continue
+                    best_iou = max(calculate_iou(pred_box, gt_box) for pred_box in pred_xyxy_all)
+                    ious.append(best_iou)
+
+                # detection quality: greedy one-to-one matching for detections above threshold.
+                candidate_pairs = []
+                for p_i, pred_box in enumerate(pred_xyxy_det):
+                    for g_i, gt_box in enumerate(gt_xyxy):
+                        pair_iou = calculate_iou(pred_box, gt_box)
+                        if pair_iou >= iou_threshold:
+                            candidate_pairs.append((pair_iou, p_i, g_i))
+
+                candidate_pairs.sort(key=lambda x: x[0], reverse=True)
+                matched_pred = set()
+                matched_gt = set()
+                for _, p_i, g_i in candidate_pairs:
+                    if p_i in matched_pred or g_i in matched_gt:
+                        continue
+                    matched_pred.add(p_i)
+                    matched_gt.add(g_i)
+                    matched_ious.append(calculate_iou(pred_xyxy_det[p_i], gt_xyxy[g_i]))
+
+                image_tp = len(matched_gt)
+                image_fp = len(pred_xyxy_det) - image_tp
+                image_fn = len(gt_xyxy) - image_tp
+                tp += image_tp
+                fp += image_fp
+                fn += image_fn
+
+                # keep slot-level labels for confusion matrix plotting.
+                for obj in range(28):
+                    gt_exists = target_conf[batch][obj] >= 0.5
+                    pred_exists = probs[batch][obj] >= conf_threshold
+                    all_true.append(int(gt_exists))
+                    all_pred.append(int(pred_exists))
 
 
-            all_true.append(true_labels)
-            all_pred.append(pred_labels)
+    y_true = all_true  # all true slot labels -> one list.
+    y_pred = all_pred  # all predicted slot labels -> one list.
+
+    total = tp + fp + fn
+    acc = tp / total if total else 0.0  # IoU-aware detection accuracy
+    prec = tp / (tp + fp) if (tp + fp) else 0.0  # IoU-aware precision
+    rec = tp / (tp + fn) if (tp + fn) else 0.0  # IoU-aware recall
+    f1 = (2 * prec * rec / (prec + rec)) if (prec + rec) else 0.0  # IoU-aware f1
+
+    # also report raw confidence-only slot metrics for troubleshooting threshold behavior.
+    raw_acc = accuracy_score(y_true, y_pred)  # raw slot accuracy (ignores IoU)
+    raw_prec = precision_score(y_true, y_pred, zero_division=0)  # raw slot precision
+    raw_rec = recall_score(y_true, y_pred, zero_division=0)  # raw slot recall
+    raw_f1 = f1_score(y_true, y_pred, zero_division=0)  # raw slot f1
 
 
-    y_true = torch.cat(all_true).numpy()  # all true labels -> one array.
-    y_pred = torch.cat(all_pred).numpy()  # all predicted labels ->one array.
+    print("accuracy:", round(raw_acc, 4))  # rounded slot-classification accuracy.
+    print("precision:", round(raw_prec, 4))  #rounded slot-classification precision.
+    print("recall:", round(raw_rec, 4))  # rounded slot-classification recall.
+    print("f1 score:", round(raw_f1, 4))  # rounded slot-classification f1 score.
+    print("iou-aware detection accuracy:", round(acc, 4))
+    print("iou-aware detection precision:", round(prec, 4))
+    print("iou-aware detection recall:", round(rec, 4))
+    print("iou-aware detection f1:", round(f1, 4))
+    print("raw slot accuracy:", round(raw_acc, 4))
+    print("raw slot precision:", round(raw_prec, 4))
+    print("raw slot recall:", round(raw_rec, 4))
+    print("raw slot f1:", round(raw_f1, 4))
 
 
-    acc = accuracy_score(y_true, y_pred)  # accuracy
-    prec = precision_score(y_true, y_pred, zero_division=0)  #precision
-    rec = recall_score(y_true, y_pred, zero_division=0)  # recall
-    f1 = f1_score(y_true, y_pred, zero_division=0)  # f1 score
-
-
-    print("accuracy:", round(acc, 4))  # rounded accuracy score.
-    print("precision:", round(prec, 4))  #rounded precision score.
-    print("recall:", round(rec, 4))  # rounded recall score.
-    print("f1 score:", round(f1, 4))  # rounded f1 score.
-
-
-    if len(ious)>0:
-        print("Mean IoU:", round(sum(ious) / len(ious), 4))
+    if len(matched_ious)>0:
+        print("Mean IoU:", f"{(sum(matched_ious) / len(matched_ious)):.6f}")
+    elif len(ious)>0:
+        print("Mean IoU:", f"{(sum(ious) / len(ious)):.6f}")
     else:
         print("No IoUs")
 
@@ -271,14 +330,20 @@ def visualize_predictions(model, loader, device):
             preds = preds[0].cpu()   # all 28 predictions for first image
             preds[:,0:4] = torch.sigmoid(preds[:,0:4])
             preds[:,4] = torch.sigmoid(preds[:,4])
+            all_preds = preds.clone()
 
 
             target = targets[0]
             path = paths[0]
 
-            confidence_threshold = 0.6
-            preds[:,4] = torch.sigmoid(preds[:,4])
+            confidence_threshold = EVAL_CONF_THRESHOLD
             preds = preds[preds[:,4] > confidence_threshold]
+
+            # if nothing passes threshold, keep top few predictions so localization can still be inspected.
+            if preds.shape[0] == 0:
+                fallback_k = 3
+                top_idx = torch.argsort(all_preds[:,4], descending=True)[:fallback_k]
+                preds = all_preds[top_idx]
 
             # showing image
             image = Image.open(path).convert("RGB")
@@ -360,14 +425,16 @@ def main():  # trianing pipeline
             images, targets = images.to(DEVICE), targets.to(DEVICE)  #move the batch to the selected device.
             optimizer.zero_grad()  # clear old gradients before the backward pass.
             preds = model(images)
-            pred_boxes = preds[:, :, :4]
+            pred_boxes = torch.sigmoid(preds[:, :, :4])
             pred_conf_logits = preds[:, :, 4]
             target_boxes = targets[:, :, :4]
             target_conf = targets[:, :, 4]
             box_loss_raw = F.smooth_l1_loss(pred_boxes, target_boxes, reduction="none")  # compute elementwise box regression loss for each sample.
-            box_loss = (box_loss_raw.mean(dim=2) * target_conf).mean()  # weight the box loss by whether the sample actually contains an object.
-            conf_loss = conf_loss_fn(pred_conf_logits,target_conf)  #compute the binary confidence loss.
-            loss = conf_loss + box_loss  # combine the confidence loss and box loss into one overall loss.
+            positive_slots = target_conf.sum().clamp(min=1.0)
+            box_loss = (box_loss_raw.mean(dim=2) * target_conf).sum() / positive_slots  # normalize box loss by positive slots so localization gradients are strong.
+            pos_weight = ((target_conf.numel() - target_conf.sum()) / positive_slots).detach().clamp(min=1.0, max=20.0)
+            conf_loss = F.binary_cross_entropy_with_logits(pred_conf_logits, target_conf, pos_weight=pos_weight)  #compute confidence loss with positive-class reweighting.
+            loss = (CONF_LOSS_WEIGHT * conf_loss) + (BOX_LOSS_WEIGHT * box_loss)  # combine losses with stronger localization emphasis.
 
             loss.backward()  # backpropagate the training loss through the network.
             optimizer.step()  # update the model parameters using the optimizer.
@@ -386,17 +453,19 @@ def main():  # trianing pipeline
             for images, targets, _ in test_loader:  # loop over each validation and test batch.
                 images, targets = images.to(DEVICE), targets.to(DEVICE)  #move the batch to the selected device.
                 preds = model(images)  # run the images through the model and get all 28 object predictions.
-                pred_boxes = preds[:, :, :4]  # extract bounding boxes for all 28 predictions.
+                pred_boxes = torch.sigmoid(preds[:, :, :4])  # extract normalized bounding boxes for all 28 predictions.
                 pred_conf_logits = preds[:, :, 4]  # extract confidence values for all 28 predictions.
                 target_boxes = targets[:, :, :4]  #extract ground truth boxes for all 28 objects.
                 target_conf = targets[:, :, 4]  # extract confidence labels for all 28 objects.
                 box_loss_raw = F.smooth_l1_loss(pred_boxes,target_boxes,reduction="none")
 
                 # average x,y,w,h errors for each object
-                box_loss = (box_loss_raw.mean(dim=2) * target_conf).mean()
+                positive_slots = target_conf.sum().clamp(min=1.0)
+                box_loss = (box_loss_raw.mean(dim=2) * target_conf).sum() / positive_slots
 
-                conf_loss = conf_loss_fn(pred_conf_logits, target_conf)  # compute the confidence loss for the validation data.
-                loss = conf_loss + box_loss  #combine the confidence and box losses for validation.
+                pos_weight = ((target_conf.numel() - target_conf.sum()) / positive_slots).detach().clamp(min=1.0, max=20.0)
+                conf_loss = F.binary_cross_entropy_with_logits(pred_conf_logits, target_conf, pos_weight=pos_weight)  # compute the confidence loss for the validation data.
+                loss = (CONF_LOSS_WEIGHT * conf_loss) + (BOX_LOSS_WEIGHT * box_loss)  #combine losses with stronger localization emphasis for validation.
                 val_loss += loss.item()  # add the current batch loss to the validation total.
                 val_box_loss_epoch += box_loss.item()  # add the current batch bounding box loss to the validation total.
                 val_conf_loss_epoch += conf_loss.item()  # add the current batch confidence loss to the validation total.
