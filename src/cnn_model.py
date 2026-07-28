@@ -12,17 +12,23 @@ class CustomCNN(nn.Module):
             nn.Conv2d(3, 32, 3, padding=1),
             nn.ReLU(),
             nn.MaxPool2d(2),
+
             nn.Conv2d(32, 64, 3, padding=1),
             nn.ReLU(),
             nn.MaxPool2d(2),
+
             nn.Conv2d(64, 128, 3, padding=1),
             nn.ReLU(),
+
+            nn.Conv2d(128, 128, 3, padding=1),
+            nn.ReLU(),
             nn.MaxPool2d(2),
-            nn.Flatten(),
-            nn.Linear(128 * 32 * 32, 128),
+
+            nn.Flatten(), #information regarding location is lost here
+            nn.Linear(128 * 32 * 32, 512),
             nn.ReLU(),
             nn.Dropout(0.5),
-            nn.Linear(128, max_objects * 5),
+            nn.Linear(512, max_objects * 5),
         )
 
     #this sends the image through the network
@@ -30,4 +36,3 @@ class CustomCNN(nn.Module):
         x = self.net(x)
         x = x.view(-1, self.max_objects, 5)
         return x
-

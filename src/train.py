@@ -39,7 +39,7 @@ BATCH_SIZE = 32  # set the batch size for mini-batch training.
 EPOCHS = 70  # set the number of training epochs.
 LEARNING_RATE = 0.001  # set the learning rate for the optimizer.
 EVAL_CONF_THRESHOLD = 0.4  # use a slightly lower eval threshold to reduce false negatives on weak detections.
-BOX_LOSS_WEIGHT = 5.0  # emphasize localization so predicted boxes align better with ground truth.
+BOX_LOSS_WEIGHT = 10.0  # emphasize localization so predicted boxes align better with ground truth.
 CONF_LOSS_WEIGHT = 0.5  # keep confidence loss important but not dominant over box quality.
 
 
