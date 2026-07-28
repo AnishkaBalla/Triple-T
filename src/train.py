@@ -33,7 +33,7 @@ LABELS_PATH = ROOT / "new_data" / "archive" / "train" / "_annotations.csv"  # bu
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")  #choose the gpu if it is available, otherwise use the cpu.
 BATCH_SIZE = 32  # set the batch size for mini-batch training.
-EPOCHS = 20  # set the number of training epochs.
+EPOCHS = 70  # set the number of training epochs.
 LEARNING_RATE = 0.001  # set the learning rate for the optimizer.
 EVAL_CONF_THRESHOLD = 0.4  # use a slightly lower eval threshold to reduce false negatives on weak detections.
 BOX_LOSS_WEIGHT = 5.0  # emphasize localization so predicted boxes align better with ground truth.
@@ -60,7 +60,7 @@ class BoxDataset(Dataset):  # inherit from pytorch's dataset class so it works w
         path = self.image_paths[idx]  # get the image path at the requested index.
         image = Image.open(path).convert("RGB")  # open the image and convert it to rgb so it has three channels.
         if self.transform:  # apply the transform pipeline (if provided)
-            image = self.transform(image)  
+            image, target = self.transform(image, target)  
         MAX_OBJECTS = 28  #define the maximum number of microplastics that one image can contain.
 
         # create an empty target tensor for 28 possible objects.
