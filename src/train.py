@@ -28,7 +28,10 @@ from checkpoint import log_results  # import the logging function to save traini
 # this script trains a lightweight cnn to predict whether an image contains a microplastic object and where the box is located.
 #it also saves simple plots so the training behavior is easy to inspect.
 ROOT = Path(__file__).resolve().parent.parent  # resolve the repository root from the current file location.
-IMAGES_DIR = dataset_path  # store the image directory that should be used for training.
+IMAGES_DIRS = [
+    dataset_path,
+    ROOT / "new_data" / "augmented_train"
+]  # store the image directory that should be used for training.
 LABELS_PATH = ROOT / "new_data" / "archive" / "train" / "_annotations.csv"  # build the path to the annotation csv from the dataset root.
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")  #choose the gpu if it is available, otherwise use the cpu.
@@ -59,16 +62,17 @@ class BoxDataset(Dataset):  # inherit from pytorch's dataset class so it works w
     def __getitem__(self, idx):  #load one image and its target label for a given index.
         path = self.image_paths[idx]  # get the image path at the requested index.
         image = Image.open(path).convert("RGB")  # open the image and convert it to rgb so it has three channels.
-        if self.transform:  # apply the transform pipeline (if provided)
-            image, target = self.transform(image, target)  
-        MAX_OBJECTS = 28  #define the maximum number of microplastics that one image can contain.
-
+        MAX_OBJECTS = 28  #define the maximum number of microplastics that one image can contain. 
         # create an empty target tensor for 28 possible objects.
         # each object contains [x_center, y_center, width, height, confidence].
         target = torch.zeros((MAX_OBJECTS, 5), dtype=torch.float32)
-
+        if self.transform:  # apply the transform pipeline (if provided)
+            image = self.transform(image) 
         # look for all annotation rows matching this image file name.
-        rows = self.labels_df[self.labels_df["filename"].apply(lambda x: Path(str(x)).stem) == path.stem]
+        image_stem = path.stem.replace("_aug_0", "").replace("_aug_1", "")
+        rows = self.labels_df[
+            self.labels_df["filename"].apply(lambda x: Path(str(x)).stem) == image_stem
+        ]
         rows = rows.sort_values(["xmin", "ymin", "xmax", "ymax"]).reset_index(drop=True)
         
         #loop through every microplastic annotation for this image.
@@ -396,7 +400,17 @@ def visualize_predictions(model, loader, device):
 def main():  # trianing pipeline
     torch.manual_seed(42)  # set a fixed random seed so training is reproducible.
     labels_df = pd.read_csv(LABELS_PATH)  #load the annotation dataframe from the labels csv.
-    image_paths = [p for p in IMAGES_DIR.rglob("*") if p.is_file() and p.suffix.lower() in {".jpg", ".jpeg", ".png"}]  # collect all image paths from the chosen image root.
+    image_paths = []
+
+    for folder in IMAGES_DIRS:
+        image_paths.extend(
+            [
+                p for p in folder.rglob("*")
+                if p.is_file() and p.suffix.lower() in {".jpg", ".jpeg", ".png"}
+            ]
+        )
+
+    print("total images:", len(image_paths))  # collect all image paths from the chosen image root.
     train_files, test_files = train_test_split(image_paths, test_size=0.3, random_state=42)  # split the image paths into train and test sets.
     train_loader = make_loader(train_files, labels_df, BATCH_SIZE, shuffle=True)  # create the training dataloader.
     test_loader = make_loader(test_files, labels_df, BATCH_SIZE, shuffle=False)  #create the test dataloader.

@@ -10,7 +10,10 @@ dataset_path = Path("new_data/archive/train")
 # augmentation pipeline (5 augments)
 train_transform = v2.Compose([
     v2.Resize((256, 256)),
-    v2.RandomHorizontalFlip(p=0.5),
+    v2.ColorJitter(
+        brightness=0.3,
+        contrast=0.2
+    ),
     v2.ToImage(),
     v2.ToDtype(torch.float32, scale=True),
 ])
